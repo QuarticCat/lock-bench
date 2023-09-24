@@ -1,27 +1,24 @@
 //! Modified from https://probablydance.com/2019/12/30/measuring-mutexes-spinlocks-and-how-bad-the-linux-scheduler-really-is/
 
 use std::{
-    cell::UnsafeCell,
     hint::spin_loop,
-    ops::{Deref, DerefMut},
     sync::atomic::{AtomicBool, Ordering},
 };
 
-#[derive(Default)]
-pub struct Spinlock<T> {
+use lock_api::{GuardSend, RawMutex};
+
+pub struct RawSpinlock {
     locked: AtomicBool,
-    data: UnsafeCell<T>,
 }
 
-unsafe impl<T: Send> Send for Spinlock<T> {}
-unsafe impl<T: Send> Sync for Spinlock<T> {}
+unsafe impl RawMutex for RawSpinlock {
+    const INIT: RawSpinlock = RawSpinlock {
+        locked: AtomicBool::new(false),
+    };
 
-pub struct SpinlockGuard<'a, T> {
-    lock: &'a Spinlock<T>,
-}
+    type GuardMarker = GuardSend;
 
-impl<T> Spinlock<T> {
-    pub fn lock(&self) -> SpinlockGuard<T> {
+    fn lock(&self) {
         loop {
             let was_locked = self.locked.load(Ordering::Relaxed);
             if !was_locked
@@ -34,26 +31,13 @@ impl<T> Spinlock<T> {
             }
             spin_loop()
         }
-        SpinlockGuard { lock: self }
     }
-}
 
-impl<'a, T> Deref for SpinlockGuard<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe { &*self.lock.data.get() }
+    fn try_lock(&self) -> bool {
+        unimplemented!()
     }
-}
 
-impl<'a, T> DerefMut for SpinlockGuard<'a, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *self.lock.data.get() }
-    }
-}
-
-impl<'a, T> Drop for SpinlockGuard<'a, T> {
-    fn drop(&mut self) {
-        self.lock.locked.store(false, Ordering::Release)
+    unsafe fn unlock(&self) {
+        self.locked.store(false, Ordering::Release);
     }
 }

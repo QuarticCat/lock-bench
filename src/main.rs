@@ -1,3 +1,5 @@
+#![allow(clippy::declare_interior_mutable_const)]
+
 mod naive;
 
 use std::{iter, sync::Barrier, time};
@@ -17,19 +19,13 @@ fn main() {
     };
     println!("{:#?}\n", options);
 
-    bench::<mutexes::Std>(&options);
-    bench::<mutexes::ParkingLot>(&options);
-    bench::<mutexes::Spin>(&options);
-    bench::<mutexes::NaiveSpin>(&options);
-
-    println!();
-    bench::<mutexes::Std>(&options);
-    bench::<mutexes::ParkingLot>(&options);
-    bench::<mutexes::Spin>(&options);
-    bench::<mutexes::NaiveSpin>(&options);
+    bench::<mutexes::Std>("std::sync::Mutex", &options);
+    bench::<mutexes::ParkingLot>("parking_lot::Mutex", &options);
+    bench::<mutexes::Spin>("spin::Mutex", &options);
+    bench::<mutexes::NaiveSpin>("Spinlock (naive)", &options);
 }
 
-fn bench<M: Mutex>(options: &Options) {
+fn bench<M: Mutex>(label: &str, options: &Options) {
     let mut times = (0..options.n_rounds)
         .map(|_| run_bench::<M>(options))
         .collect::<Vec<_>>();
@@ -45,10 +41,7 @@ fn bench<M: Mutex>(options: &Options) {
 
     println!(
         "{:<20} avg {:<12} min {:<12} max {:<12}",
-        M::LABEL,
-        avg,
-        min,
-        max
+        label, avg, min, max
     )
 }
 
@@ -71,7 +64,6 @@ fn random_numbers(seed: u32) -> impl Iterator<Item = u32> {
 }
 
 trait Mutex: Sync + Send + Default {
-    const LABEL: &'static str;
     fn with_lock(&self, f: impl FnOnce(&mut u32));
 }
 
@@ -124,35 +116,18 @@ mod mutexes {
     use super::Mutex;
 
     pub(crate) type Std = std::sync::Mutex<u32>;
+    pub(crate) type ParkingLot = lock_api::Mutex<parking_lot::RawMutex, u32>;
+    pub(crate) type Spin = lock_api::Mutex<spin::mutex::Mutex<()>, u32>;
+    pub(crate) type NaiveSpin = lock_api::Mutex<crate::naive::RawSpinlock, u32>;
+
     impl Mutex for Std {
-        const LABEL: &'static str = "std::sync::Mutex";
         fn with_lock(&self, f: impl FnOnce(&mut u32)) {
             let mut guard = self.lock().unwrap();
             f(&mut guard)
         }
     }
 
-    pub(crate) type ParkingLot = parking_lot::Mutex<u32>;
-    impl Mutex for ParkingLot {
-        const LABEL: &'static str = "parking_lot::Mutex";
-        fn with_lock(&self, f: impl FnOnce(&mut u32)) {
-            let mut guard = self.lock();
-            f(&mut guard)
-        }
-    }
-
-    pub(crate) type Spin = spin::Mutex<u32>;
-    impl Mutex for Spin {
-        const LABEL: &'static str = "spin::Mutex";
-        fn with_lock(&self, f: impl FnOnce(&mut u32)) {
-            let mut guard = self.lock();
-            f(&mut guard)
-        }
-    }
-
-    pub(crate) type NaiveSpin = crate::naive::Spinlock<u32>;
-    impl Mutex for NaiveSpin {
-        const LABEL: &'static str = "Spinlock (naive)";
+    impl<T: lock_api::RawMutex + Sync + Send> Mutex for lock_api::Mutex<T, u32> {
         fn with_lock(&self, f: impl FnOnce(&mut u32)) {
             let mut guard = self.lock();
             f(&mut guard)
