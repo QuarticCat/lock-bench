@@ -1,7 +1,9 @@
+#![feature(thread_local)]
 #![allow(clippy::declare_interior_mutable_const)]
 
-mod backoff;
 mod amd;
+mod backoff;
+mod mcs;
 
 use std::{iter, sync::Barrier, time};
 
@@ -23,8 +25,9 @@ fn main() {
     bench::<mutexes::Std>("std::sync::Mutex", &options);
     bench::<mutexes::ParkingLot>("parking_lot::Mutex", &options);
     bench::<mutexes::Spin>("spin::Mutex", &options);
-    bench::<mutexes::AmdSpin>("spinlock (amd)", &options);
-    bench::<mutexes::BackoffSpin>("spinlock (backoff)", &options);
+    bench::<mutexes::Amd>("spinlock (amd)", &options);
+    bench::<mutexes::Backoff>("spinlock (backoff)", &options);
+    bench::<mutexes::Mcs>("spinlock (mcs)", &options);
 }
 
 fn bench<M: Mutex>(label: &str, options: &Options) {
@@ -77,7 +80,7 @@ fn run_bench<M: Mutex>(options: &Options) -> time::Duration {
     let start_barrier = &Barrier::new(options.n_threads as usize + 1);
     let end_barrier = &Barrier::new(options.n_threads as usize + 1);
 
-    let elapsed = scope(|scope| {
+    scope(|scope| {
         let thread_seeds = random_numbers(0x6F4A955E).scan(0x9BA2BF27, |state, n| {
             *state ^= n;
             Some(*state)
@@ -110,8 +113,7 @@ fn run_bench<M: Mutex>(options: &Options) -> time::Duration {
 
         elapsed
     })
-    .unwrap();
-    elapsed
+    .unwrap()
 }
 
 mod mutexes {
@@ -121,8 +123,9 @@ mod mutexes {
     pub(crate) type ParkingLot = lock_api::Mutex<parking_lot::RawMutex, u32>;
     pub(crate) type Spin = lock_api::Mutex<spin::mutex::Mutex<()>, u32>;
 
-    pub(crate) type AmdSpin = lock_api::Mutex<crate::amd::RawSpinlock, u32>;
-    pub(crate) type BackoffSpin = lock_api::Mutex<crate::backoff::RawSpinlock, u32>;
+    pub(crate) type Amd = lock_api::Mutex<crate::amd::RawSpinlock, u32>;
+    pub(crate) type Backoff = lock_api::Mutex<crate::backoff::RawSpinlock, u32>;
+    pub(crate) type Mcs = lock_api::Mutex<crate::mcs::RawSpinlock, u32>;
 
     impl Mutex for Std {
         fn with_lock(&self, f: impl FnOnce(&mut u32)) {
