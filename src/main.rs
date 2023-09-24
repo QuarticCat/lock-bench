@@ -1,3 +1,5 @@
+mod naive;
+
 use std::{iter, sync::Barrier, time};
 
 use crossbeam_utils::{thread::scope, CachePadded};
@@ -18,13 +20,13 @@ fn main() {
     bench::<mutexes::Std>(&options);
     bench::<mutexes::ParkingLot>(&options);
     bench::<mutexes::Spin>(&options);
-    bench::<mutexes::AmdSpin>(&options);
+    bench::<mutexes::NaiveSpin>(&options);
 
     println!();
     bench::<mutexes::Std>(&options);
     bench::<mutexes::ParkingLot>(&options);
     bench::<mutexes::Spin>(&options);
-    bench::<mutexes::AmdSpin>(&options);
+    bench::<mutexes::NaiveSpin>(&options);
 }
 
 fn bench<M: Mutex>(options: &Options) {
@@ -148,76 +150,12 @@ mod mutexes {
         }
     }
 
-    pub(crate) type AmdSpin = crate::amd_spinlock::AmdSpinlock<u32>;
-    impl Mutex for AmdSpin {
-        const LABEL: &'static str = "AmdSpinlock";
+    pub(crate) type NaiveSpin = crate::naive::Spinlock<u32>;
+    impl Mutex for NaiveSpin {
+        const LABEL: &'static str = "Spinlock (naive)";
         fn with_lock(&self, f: impl FnOnce(&mut u32)) {
             let mut guard = self.lock();
             f(&mut guard)
-        }
-    }
-}
-
-mod amd_spinlock {
-    use std::{
-        cell::UnsafeCell,
-        ops,
-        sync::atomic::{spin_loop_hint, AtomicBool, Ordering},
-    };
-
-    #[derive(Default)]
-    pub(crate) struct AmdSpinlock<T> {
-        locked: AtomicBool,
-        data: UnsafeCell<T>,
-    }
-    unsafe impl<T: Send> Send for AmdSpinlock<T> {}
-    unsafe impl<T: Send> Sync for AmdSpinlock<T> {}
-
-    pub(crate) struct AmdSpinlockGuard<'a, T> {
-        lock: &'a AmdSpinlock<T>,
-    }
-
-    impl<T> AmdSpinlock<T> {
-        pub(crate) fn lock(&self) -> AmdSpinlockGuard<T> {
-            loop {
-                let was_locked = self.locked.load(Ordering::Relaxed);
-                if !was_locked
-                    && self
-                        .locked
-                        .compare_exchange_weak(
-                            was_locked,
-                            true,
-                            Ordering::Acquire,
-                            Ordering::Relaxed,
-                        )
-                        .is_ok()
-                {
-                    break;
-                }
-                spin_loop_hint()
-            }
-            AmdSpinlockGuard { lock: self }
-        }
-    }
-
-    impl<'a, T> ops::Deref for AmdSpinlockGuard<'a, T> {
-        type Target = T;
-        fn deref(&self) -> &Self::Target {
-            let ptr = self.lock.data.get();
-            unsafe { &*ptr }
-        }
-    }
-
-    impl<'a, T> ops::DerefMut for AmdSpinlockGuard<'a, T> {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            let ptr = self.lock.data.get();
-            unsafe { &mut *ptr }
-        }
-    }
-
-    impl<'a, T> Drop for AmdSpinlockGuard<'a, T> {
-        fn drop(&mut self) {
-            self.lock.locked.store(false, Ordering::Release)
         }
     }
 }
