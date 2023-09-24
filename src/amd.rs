@@ -34,7 +34,9 @@ unsafe impl RawMutex for RawSpinlock {
     }
 
     fn try_lock(&self) -> bool {
-        unimplemented!()
+        self.locked
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
     }
 
     unsafe fn unlock(&self) {

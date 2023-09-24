@@ -1,6 +1,7 @@
 #![allow(clippy::declare_interior_mutable_const)]
 
-mod naive;
+mod backoff;
+mod amd;
 
 use std::{iter, sync::Barrier, time};
 
@@ -22,7 +23,8 @@ fn main() {
     bench::<mutexes::Std>("std::sync::Mutex", &options);
     bench::<mutexes::ParkingLot>("parking_lot::Mutex", &options);
     bench::<mutexes::Spin>("spin::Mutex", &options);
-    bench::<mutexes::NaiveSpin>("Spinlock (naive)", &options);
+    bench::<mutexes::AmdSpin>("spinlock (amd)", &options);
+    bench::<mutexes::BackoffSpin>("spinlock (backoff)", &options);
 }
 
 fn bench<M: Mutex>(label: &str, options: &Options) {
@@ -118,7 +120,9 @@ mod mutexes {
     pub(crate) type Std = std::sync::Mutex<u32>;
     pub(crate) type ParkingLot = lock_api::Mutex<parking_lot::RawMutex, u32>;
     pub(crate) type Spin = lock_api::Mutex<spin::mutex::Mutex<()>, u32>;
-    pub(crate) type NaiveSpin = lock_api::Mutex<crate::naive::RawSpinlock, u32>;
+
+    pub(crate) type AmdSpin = lock_api::Mutex<crate::amd::RawSpinlock, u32>;
+    pub(crate) type BackoffSpin = lock_api::Mutex<crate::backoff::RawSpinlock, u32>;
 
     impl Mutex for Std {
         fn with_lock(&self, f: impl FnOnce(&mut u32)) {
